@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>ESP32 Điều khiển</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      padding: 30px;
+    }
+    h1, h2 {
+      color: #333;
+    }
+    button {
+      font-size: 18px;
+      padding: 10px 20px;
+      margin: 10px;
+      cursor: pointer;
+    }
+    #status {
+      margin-top: 20px;
+      font-style: italic;
+      color: #555;
+    }
+    canvas {
+      margin-top: 30px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Điều khiển cảm biến ESP32</h1>
+
+  {% if data %}
+    <h2>🌡️ Nhiệt độ: {{ data.temperature }} °C</h2>
+    <h2>💧 Độ ẩm: {{ data.humidity }} %</h2>
+  {% else %}
+    <h2>🌡️ Nhiệt độ: -- °C</h2>
+    <h2>💧 Độ ẩm: -- %</h2>
+  {% endif %}
+
+  <h2>📡 Trạng thái đo: 
+    {% if measuring %}
+      <strong style="color: green;">Bật</strong>
+    {% else %}
+      <strong style="color: red;">Tắt</strong>
+    {% endif %}
+  </h2>
+
+  <button onclick="sendCommand('bật')">▶️ Bắt đầu</button>
+  <button onclick="sendCommand('tắt')">⏹️ Dừng đo</button>
+  <br><br>
+  <button onclick="startVoiceControl()">🎤 Điều khiển bằng giọng nói</button>
+
+  <p id="status"></p>
+
+  <canvas id="chart" width="600" height="300"></canvas>
+
+  <script>
+    function sendCommand(cmd) {
+      fetch("/toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: cmd })
+      })
+      .then(res => res.json())
+      .then(data => {
+        document.getElementById("status").textContent = `✅ Lệnh "${cmd}" đã gửi thành công!`;
+        setTimeout(() => location.reload(), 1000);
+      })
+      .catch(err => {
+        document.getElementById("status").textContent = "❌ Gửi lệnh thất bại: " + err;
+      });
+    }
+
+    function startVoiceControl() {
+      const status = document.getElementById("status");
+      status.textContent = "🎤 Đang lắng nghe...";
+
+      const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+      recognition.lang = "vi-VN";
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      recognition.onresult = function(event) {
+        const transcript = event.results[0][0].transcript.toLowerCase();
+        status.textContent = "🗣️ Bạn nói: " + transcript;
+
+        if (transcript.includes("bật") || transcript.includes("đo")) {
+         sendCommand("bật");
+        } else if (transcript.includes("tắt") || transcript.includes("ngừng") || transcript.includes("dừng")) {
+         sendCommand("tắt");
+        } else {
+          status.textContent += " (Không hiểu lệnh)";
+        }
+
+      };
+
+      recognition.onerror = function(event) {
+        status.textContent = "❌ Lỗi nhận giọng nói: " + event.error;
+      };
+
+      recognition.start();
+    }
+
+    const ctx = document.getElementById('chart').getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          {
+            label: 'Nhiệt độ (°C)',
+            borderColor: 'red',
+            data: [],
+            fill: false,
+          },
+          {
+            label: 'Độ ẩm (%)',
+            borderColor: 'blue',
+            data: [],
+            fill: false,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        animation: false,
+        scales: {
+          y: { beginAtZero: true },
+        },
+      },
+    });
+
+    async function fetchData() {
+      const response = await fetch('/data');
+      const data = await response.json();
+
+      chart.data.labels = data.map(d => d.time);
+      chart.data.datasets[0].data = data.map(d => d.temperature);
+      chart.data.datasets[1].data = data.map(d => d.humidity);
+      chart.update();
+    }
+
+    setInterval(fetchData, 2000);
+    fetchData();
+    setInterval(() => location.reload(), 5000);
+  </script>
+</body>
+</html>
